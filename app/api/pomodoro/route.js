@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server"
+import { getServerSession } from "next-auth/next"
+import { authOptions } from "../auth/[...nextauth]/route"
 import dbConnect from "@/lib/db"
 import PomodoroSession from "@/models/PomodoroSession"
 import Task from "@/models/Task"
 
-// Helper to get a unique user ID (in a real app, this would come from authentication)
-function getUserId() {
-  return "demo-user-id"
-}
-
 export async function GET() {
   try {
     await dbConnect()
-    const userId = getUserId()
+
+    // Get the authenticated user
+    const session = await getServerSession(authOptions)
+    if (!session) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
+    }
+
+    const userId = session.user.id
 
     const sessions = await PomodoroSession.find({ userId }).sort({ date: -1 })
 
@@ -24,7 +28,14 @@ export async function GET() {
 export async function POST(request) {
   try {
     await dbConnect()
-    const userId = getUserId()
+
+    // Get the authenticated user
+    const session = await getServerSession(authOptions)
+    if (!session) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
+    }
+
+    const userId = session.user.id
 
     const data = await request.json()
 
@@ -34,14 +45,14 @@ export async function POST(request) {
       userId,
     }
 
-    const session = await PomodoroSession.create(sessionData)
+    const pomodoroSession = await PomodoroSession.create(sessionData)
 
     // If this session is associated with a task, increment its pomodoro count
-    if (session.taskId) {
-      await Task.findByIdAndUpdate(session.taskId, { $inc: { pomodoroCount: 1 } })
+    if (pomodoroSession.taskId) {
+      await Task.findOneAndUpdate({ _id: pomodoroSession.taskId, userId }, { $inc: { pomodoroCount: 1 } })
     }
 
-    return NextResponse.json({ success: true, data: session }, { status: 201 })
+    return NextResponse.json({ success: true, data: pomodoroSession }, { status: 201 })
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }

@@ -1,17 +1,20 @@
 import { NextResponse } from "next/server"
+import { getServerSession } from "next-auth/next"
+import { authOptions } from "../../auth/[...nextauth]/route"
 import dbConnect from "@/lib/db"
 import Task from "@/models/Task"
-
-// Helper to get a unique user ID (in a real app, this would come from authentication)
-function getUserId() {
-  // For demo purposes, we'll use a fixed ID
-  return "demo-user-id"
-}
 
 export async function GET(request, { params }) {
   try {
     await dbConnect()
-    const userId = getUserId()
+
+    // Get the authenticated user
+    const session = await getServerSession(authOptions)
+    if (!session) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
+    }
+
+    const userId = session.user.id
 
     const task = await Task.findOne({ _id: params.id, userId })
 
@@ -28,7 +31,14 @@ export async function GET(request, { params }) {
 export async function PUT(request, { params }) {
   try {
     await dbConnect()
-    const userId = getUserId()
+
+    // Get the authenticated user
+    const session = await getServerSession(authOptions)
+    if (!session) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
+    }
+
+    const userId = session.user.id
 
     const data = await request.json()
 
@@ -47,7 +57,14 @@ export async function PUT(request, { params }) {
 export async function DELETE(request, { params }) {
   try {
     await dbConnect()
-    const userId = getUserId()
+
+    // Get the authenticated user
+    const session = await getServerSession(authOptions)
+    if (!session) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
+    }
+
+    const userId = session.user.id
 
     const task = await Task.findOneAndDelete({ _id: params.id, userId })
 
@@ -56,7 +73,7 @@ export async function DELETE(request, { params }) {
     }
 
     // Also remove this task from any dependencies
-    await Task.updateMany({ dependencies: params.id }, { $pull: { dependencies: params.id } })
+    await Task.updateMany({ dependencies: params.id, userId }, { $pull: { dependencies: params.id } })
 
     return NextResponse.json({ success: true, data: {} })
   } catch (error) {

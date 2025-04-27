@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server"
+import { getServerSession } from "next-auth/next"
+import { authOptions } from "../auth/[...nextauth]/route"
 import dbConnect from "@/lib/db"
 import WeeklyReport from "@/models/WeeklyReport"
 import Task from "@/models/Task"
 import PomodoroSession from "@/models/PomodoroSession"
-
-// Helper to get a unique user ID (in a real app, this would come from authentication)
-function getUserId() {
-  return "demo-user-id"
-}
 
 // Helper to get start of week
 function getStartOfWeek(date) {
@@ -25,7 +22,14 @@ function formatDate(date) {
 export async function GET() {
   try {
     await dbConnect()
-    const userId = getUserId()
+
+    // Get the authenticated user
+    const session = await getServerSession(authOptions)
+    if (!session) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
+    }
+
+    const userId = session.user.id
 
     const reports = await WeeklyReport.find({ userId }).sort({ weekStart: -1 })
 
@@ -38,7 +42,14 @@ export async function GET() {
 export async function POST(request) {
   try {
     await dbConnect()
-    const userId = getUserId()
+
+    // Get the authenticated user
+    const session = await getServerSession(authOptions)
+    if (!session) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
+    }
+
+    const userId = session.user.id
 
     // Generate reports for all weeks
     const tasks = await Task.find({ userId })

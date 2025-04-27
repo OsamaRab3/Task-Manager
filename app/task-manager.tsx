@@ -1,6 +1,5 @@
 "use client"
 
-import { Header } from "@/components/header"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Plus, Pencil, Trash2, Play, Square, Timer, Link } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -27,6 +26,7 @@ import { Slider } from "@/components/ui/slider"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useToast } from "@/components/ui/use-toast"
+import { useSession } from "next-auth/react"
 
 // Format time (seconds) to readable format
 const formatTime = (seconds: number) => {
@@ -145,7 +145,9 @@ type WeeklyReport = {
   pomodoroCount: number
 }
 
-function TaskManagerComponent() {
+export default function TaskManager() {
+  const { data: session, status } = useSession()
+
   // State for tasks and UI
   const [tasks, setTasks] = useState<Task[]>([])
   const [newTaskTitle, setNewTaskTitle] = useState("")
@@ -200,6 +202,9 @@ function TaskManagerComponent() {
 
   // Fetch tasks from API
   const fetchTasks = useCallback(async () => {
+    // Only fetch if authenticated
+    if (status !== "authenticated") return
+
     try {
       setIsLoading(true)
       const response = await fetch("/api/tasks")
@@ -230,10 +235,13 @@ function TaskManagerComponent() {
     } finally {
       setIsLoading(false)
     }
-  }, [toast])
+  }, [toast, status])
 
   // Fetch pomodoro sessions from API
   const fetchPomodoroSessions = useCallback(async () => {
+    // Only fetch if authenticated
+    if (status !== "authenticated") return
+
     try {
       const response = await fetch("/api/pomodoro")
       const result = await response.json()
@@ -254,10 +262,13 @@ function TaskManagerComponent() {
         variant: "destructive",
       })
     }
-  }, [toast])
+  }, [toast, status])
 
   // Fetch or generate weekly reports
   const fetchWeeklyReports = useCallback(async () => {
+    // Only fetch if authenticated
+    if (status !== "authenticated") return
+
     try {
       setIsGeneratingReports(true)
       const response = await fetch("/api/reports", {
@@ -288,14 +299,16 @@ function TaskManagerComponent() {
     } finally {
       setIsGeneratingReports(false)
     }
-  }, [toast])
+  }, [toast, status])
 
-  // Load data on component mount
+  // Load data on component mount and when authentication status changes
   useEffect(() => {
-    fetchTasks()
-    fetchPomodoroSessions()
-    fetchWeeklyReports()
-  }, [fetchTasks, fetchPomodoroSessions, fetchWeeklyReports])
+    if (status === "authenticated") {
+      fetchTasks()
+      fetchPomodoroSessions()
+      fetchWeeklyReports()
+    }
+  }, [fetchTasks, fetchPomodoroSessions, fetchWeeklyReports, status])
 
   // Update active timers every second
   useEffect(() => {
@@ -324,6 +337,9 @@ function TaskManagerComponent() {
 
   // Save task updates to the server periodically
   useEffect(() => {
+    // Only save if authenticated
+    if (status !== "authenticated") return
+
     const saveInterval = setInterval(async () => {
       // Find tasks that are in progress and have accumulated time
       const tasksToUpdate = tasks.filter((task) => task.inProgress && task._id && task.timeSpent > 0)
@@ -348,7 +364,7 @@ function TaskManagerComponent() {
     }, 30000) // Save every 30 seconds
 
     return () => clearInterval(saveInterval)
-  }, [tasks])
+  }, [tasks, status])
 
   // Pomodoro timer effect
   useEffect(() => {
@@ -427,6 +443,9 @@ function TaskManagerComponent() {
 
   // Save pomodoro session to server
   const savePomodoroSession = async (session: PomodoroSession) => {
+    // Only save if authenticated
+    if (status !== "authenticated") return
+
     try {
       const response = await fetch("/api/pomodoro", {
         method: "POST",
@@ -465,6 +484,14 @@ function TaskManagerComponent() {
   // Add a new task
   const addTask = async () => {
     if (newTaskTitle.trim() === "") return
+    if (status !== "authenticated") {
+      toast({
+        title: "Error",
+        description: "You must be signed in to add tasks",
+        variant: "destructive",
+      })
+      return
+    }
 
     setIsSaving(true)
 
@@ -884,6 +911,19 @@ function TaskManagerComponent() {
     timeSpent: report.totalTimeSpent / 3600, // Convert to hours
     efficiency: report.expectedVsActual <= 2 ? report.expectedVsActual : 2, // Cap at 2 for better visualization
   }))
+
+  // If not authenticated, show a message
+  if (status === "loading") {
+    return (
+      <div className="container mx-auto p-4 max-w-3xl">
+        <Card>
+          <CardContent className="flex justify-center items-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div className="container mx-auto p-4 max-w-3xl">
@@ -1477,17 +1517,6 @@ function TaskManagerComponent() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  )
-}
-
-export default function Home() {
-  return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <Header />
-      <main className="py-8">
-        <TaskManagerComponent />
-      </main>
     </div>
   )
 }

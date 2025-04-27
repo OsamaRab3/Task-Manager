@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server"
+import { getServerSession } from "next-auth/next"
+import { authOptions } from "../auth/[...nextauth]/route"
 import dbConnect from "@/lib/db"
 import Task from "@/models/Task"
-
-// Helper to get a unique user ID (in a real app, this would come from authentication)
-function getUserId(req) {
-  // For demo purposes, we'll use a fixed ID
-  // In a real app, this would come from the authenticated user
-  return "demo-user-id"
-}
 
 export async function GET() {
   try {
     await dbConnect()
-    const userId = getUserId()
+
+    // Get the authenticated user
+    const session = await getServerSession(authOptions)
+    if (!session) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
+    }
+
+    const userId = session.user.id
 
     const tasks = await Task.find({ userId }).sort({ createdAt: -1 })
 
@@ -25,7 +27,14 @@ export async function GET() {
 export async function POST(request) {
   try {
     await dbConnect()
-    const userId = getUserId()
+
+    // Get the authenticated user
+    const session = await getServerSession(authOptions)
+    if (!session) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
+    }
+
+    const userId = session.user.id
 
     const data = await request.json()
 
