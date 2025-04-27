@@ -4,6 +4,12 @@ import { authOptions } from "../auth/[...nextauth]/route"
 import dbConnect from "@/lib/db"
 import PomodoroSession from "@/models/PomodoroSession"
 import Task from "@/models/Task"
+import UserActivity from "@/models/UserActivity"
+
+// Helper to format date to YYYY-MM-DD
+function formatDate(date) {
+  return new Date(date).toISOString().split("T")[0]
+}
 
 export async function GET() {
   try {
@@ -51,6 +57,15 @@ export async function POST(request) {
     if (pomodoroSession.taskId) {
       await Task.findOneAndUpdate({ _id: pomodoroSession.taskId, userId }, { $inc: { pomodoroCount: 1 } })
     }
+
+    // Update user activity for today
+    const today = formatDate(new Date(pomodoroSession.date))
+
+    await UserActivity.findOneAndUpdate(
+      { userId, date: new Date(today) },
+      { $inc: { pomodorosCompleted: 1 } },
+      { upsert: true, new: true },
+    )
 
     return NextResponse.json({ success: true, data: pomodoroSession }, { status: 201 })
   } catch (error) {

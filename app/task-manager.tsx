@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Plus, Pencil, Trash2, Play, Square, Timer, Link } from "lucide-react"
+import { Plus, Pencil, Trash2, Play, Square, Timer, Link, History } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -27,6 +27,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useToast } from "@/components/ui/use-toast"
 import { useSession } from "next-auth/react"
+import HistoryView from "@/components/history-view"
 
 // Format time (seconds) to readable format
 const formatTime = (seconds: number) => {
@@ -928,10 +929,14 @@ export default function TaskManager() {
   return (
     <div className="container mx-auto p-4 max-w-3xl">
       <Tabs defaultValue="tasks">
-        <TabsList className="grid w-full grid-cols-3 mb-6">
+        <TabsList className="grid w-full grid-cols-4 mb-6">
           <TabsTrigger value="tasks">Tasks</TabsTrigger>
           <TabsTrigger value="pomodoro">Pomodoro</TabsTrigger>
           <TabsTrigger value="reports">Reports</TabsTrigger>
+          <TabsTrigger value="history">
+            <History className="h-4 w-4 mr-2" />
+            History
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="tasks">
@@ -1355,6 +1360,10 @@ export default function TaskManager() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="history">
+          <HistoryView />
         </TabsContent>
       </Tabs>
 

@@ -3,6 +3,12 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "../auth/[...nextauth]/route"
 import dbConnect from "@/lib/db"
 import Task from "@/models/Task"
+import UserActivity from "@/models/UserActivity"
+
+// Helper to format date to YYYY-MM-DD
+function formatDate(date) {
+  return new Date(date).toISOString().split("T")[0]
+}
 
 export async function GET() {
   try {
@@ -45,6 +51,15 @@ export async function POST(request) {
     }
 
     const task = await Task.create(taskData)
+
+    // Update user activity for today
+    const today = formatDate(new Date())
+
+    await UserActivity.findOneAndUpdate(
+      { userId, date: new Date(today) },
+      { $inc: { tasksCreated: 1 } },
+      { upsert: true, new: true },
+    )
 
     return NextResponse.json({ success: true, data: task }, { status: 201 })
   } catch (error) {
