@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Plus, Pencil, Trash2, Play, Square, Timer, Link } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -25,6 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { useToast } from "@/components/ui/use-toast"
 
 // Format time (seconds) to readable format
 const formatTime = (seconds: number) => {
@@ -111,6 +112,7 @@ function PieChartComponent({ data }: { data: { name: string; value: number; stat
 
 // Task type definition
 type Task = {
+  _id?: string
   id: string
   title: string
   completed: boolean
@@ -126,6 +128,7 @@ type Task = {
 
 // Pomodoro session type
 type PomodoroSession = {
+  _id?: string
   taskId: string | null
   date: string // ISO date string
   duration: number // in seconds
@@ -133,6 +136,7 @@ type PomodoroSession = {
 
 // Weekly report type
 type WeeklyReport = {
+  _id?: string
   weekStart: string // ISO date string
   tasksCompleted: number
   totalTimeSpent: number
@@ -148,6 +152,8 @@ export default function TaskManager() {
   const [editedTitle, setEditedTitle] = useState("")
   const [editedExpectedTime, setEditedExpectedTime] = useState(0)
   const [editedDependencies, setEditedDependencies] = useState<string[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
 
   // Pomodoro timer state
   const [pomodoroActive, setPomodoroActive] = useState(false)
@@ -167,6 +173,10 @@ export default function TaskManager() {
   // Weekly reports state
   const [weeklyReports, setWeeklyReports] = useState<WeeklyReport[]>([])
   const [selectedWeek, setSelectedWeek] = useState<string>(formatDate(getStartOfWeek(new Date())))
+  const [isGeneratingReports, setIsGeneratingReports] = useState(false)
+
+  // Toast notifications
+  const { toast } = useToast()
 
   // Audio refs
   const alarmAudioRef = useRef<HTMLAudioElement | null>(null)
@@ -186,6 +196,105 @@ export default function TaskManager() {
       }
     }
   }, [])
+
+  // Fetch tasks from API
+  const fetchTasks = useCallback(async () => {
+    try {
+      setIsLoading(true)
+      const response = await fetch("/api/tasks")
+      const result = await response.json()
+
+      if (result.success) {
+        // Convert MongoDB _id to id for frontend compatibility
+        const tasksWithId = result.data.map((task: any) => ({
+          ...task,
+          id: task._id,
+          inProgress: false, // Reset inProgress state on load
+          startTime: null, // Reset startTime on load
+        }))
+        setTasks(tasksWithId)
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to load tasks",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to connect to the server",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }, [toast])
+
+  // Fetch pomodoro sessions from API
+  const fetchPomodoroSessions = useCallback(async () => {
+    try {
+      const response = await fetch("/api/pomodoro")
+      const result = await response.json()
+
+      if (result.success) {
+        setPomodoroHistory(result.data)
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to load pomodoro sessions",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to connect to the server",
+        variant: "destructive",
+      })
+    }
+  }, [toast])
+
+  // Fetch or generate weekly reports
+  const fetchWeeklyReports = useCallback(async () => {
+    try {
+      setIsGeneratingReports(true)
+      const response = await fetch("/api/reports", {
+        method: "POST", // Use POST to trigger report generation
+      })
+      const result = await response.json()
+
+      if (result.success) {
+        setWeeklyReports(result.data)
+
+        // Set the most recent week as selected
+        if (result.data.length > 0) {
+          setSelectedWeek(result.data[0].weekStart)
+        }
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to generate reports",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to connect to the server",
+        variant: "destructive",
+      })
+    } finally {
+      setIsGeneratingReports(false)
+    }
+  }, [toast])
+
+  // Load data on component mount
+  useEffect(() => {
+    fetchTasks()
+    fetchPomodoroSessions()
+    fetchWeeklyReports()
+  }, [fetchTasks, fetchPomodoroSessions, fetchWeeklyReports])
 
   // Update active timers every second
   useEffect(() => {
@@ -211,6 +320,34 @@ export default function TaskManager() {
 
     return () => clearInterval(interval)
   }, [])
+
+  // Save task updates to the server periodically
+  useEffect(() => {
+    const saveInterval = setInterval(async () => {
+      // Find tasks that are in progress and have accumulated time
+      const tasksToUpdate = tasks.filter((task) => task.inProgress && task._id && task.timeSpent > 0)
+
+      if (tasksToUpdate.length > 0) {
+        for (const task of tasksToUpdate) {
+          try {
+            await fetch(`/api/tasks/${task._id}`, {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                timeSpent: task.timeSpent,
+              }),
+            })
+          } catch (error) {
+            console.error("Failed to update task time:", error)
+          }
+        }
+      }
+    }, 30000) // Save every 30 seconds
+
+    return () => clearInterval(saveInterval)
+  }, [tasks])
 
   // Pomodoro timer effect
   useEffect(() => {
@@ -241,13 +378,15 @@ export default function TaskManager() {
                   ),
                 )
 
-                // Add to pomodoro history
+                // Add to pomodoro history and save to server
                 const newSession: PomodoroSession = {
                   taskId: selectedTaskForPomodoro,
                   date: new Date().toISOString(),
                   duration: pomodoroSettings.workDuration,
                 }
-                setPomodoroHistory((prev) => [...prev, newSession])
+
+                // Save pomodoro session to server
+                savePomodoroSession(newSession)
               }
 
               // Increment pomodoro count
@@ -285,90 +424,53 @@ export default function TaskManager() {
     }
   }, [pomodoroActive, currentPomodoroSession, pomodoroSettings, selectedTaskForPomodoro])
 
-  // Generate weekly reports
-  useEffect(() => {
-    // Only generate reports if we have tasks
-    if (tasks.length === 0) return
-
-    // Get all weeks from the earliest task to now
-    const allDates = tasks.map((task) => new Date(task.createdAt))
-    if (allDates.length === 0) return
-
-    const earliestDate = new Date(Math.min(...allDates.map((d) => d.getTime())))
-    const startOfEarliestWeek = getStartOfWeek(earliestDate)
-    const today = new Date()
-    const startOfCurrentWeek = getStartOfWeek(today)
-
-    const weeklyReportsData: WeeklyReport[] = []
-    const currentWeekStart = new Date(startOfEarliestWeek)
-
-    while (currentWeekStart <= startOfCurrentWeek) {
-      const weekStartStr = formatDate(currentWeekStart)
-      const weekEndDate = new Date(currentWeekStart)
-      weekEndDate.setDate(currentWeekStart.getDate() + 6)
-      const weekEndStr = formatDate(weekEndDate)
-
-      // Get tasks completed this week
-      const tasksCompletedThisWeek = tasks.filter(
-        (task) => task.completedAt && task.completedAt >= weekStartStr && task.completedAt <= weekEndStr,
-      )
-
-      // Calculate time spent on tasks this week (including incomplete tasks)
-      const tasksActiveThisWeek = tasks.filter((task) => {
-        const createdBeforeWeekEnd = task.createdAt <= weekEndStr
-        const completedAfterWeekStart = !task.completedAt || task.completedAt >= weekStartStr
-        return createdBeforeWeekEnd && completedAfterWeekStart
+  // Save pomodoro session to server
+  const savePomodoroSession = async (session: PomodoroSession) => {
+    try {
+      const response = await fetch("/api/pomodoro", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(session),
       })
 
-      const timeSpentThisWeek = tasksActiveThisWeek.reduce((total, task) => total + task.timeSpent, 0)
+      const result = await response.json()
 
-      // Calculate expected vs actual time ratio
-      const tasksWithExpectedTime = tasksCompletedThisWeek.filter((task) => task.expectedTime > 0)
-      let expectedVsActual = 1
-      if (tasksWithExpectedTime.length > 0) {
-        const totalExpected = tasksWithExpectedTime.reduce((total, task) => total + task.expectedTime, 0)
-        const totalActual = tasksWithExpectedTime.reduce((total, task) => total + task.timeSpent, 0)
-        expectedVsActual = totalExpected > 0 ? totalActual / totalExpected : 1
+      if (result.success) {
+        setPomodoroHistory((prev) => [...prev, result.data])
+
+        // If this session is associated with a task, update the task's pomodoro count
+        if (session.taskId) {
+          const taskToUpdate = tasks.find((t) => t.id === session.taskId)
+          if (taskToUpdate && taskToUpdate._id) {
+            await fetch(`/api/tasks/${taskToUpdate._id}`, {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                pomodoroCount: (taskToUpdate.pomodoroCount || 0) + 1,
+              }),
+            })
+          }
+        }
       }
-
-      // Count pomodoros this week
-      const pomodorosThisWeek = pomodoroHistory.filter(
-        (session) => session.date >= weekStartStr && session.date <= weekEndStr,
-      ).length
-
-      weeklyReportsData.push({
-        weekStart: weekStartStr,
-        tasksCompleted: tasksCompletedThisWeek.length,
-        totalTimeSpent: timeSpentThisWeek,
-        expectedVsActual,
-        pomodoroCount: pomodorosThisWeek,
-      })
-
-      // Move to next week
-      currentWeekStart.setDate(currentWeekStart.getDate() + 7)
+    } catch (error) {
+      console.error("Failed to save pomodoro session:", error)
     }
-
-    setWeeklyReports(weeklyReportsData)
-  }, [tasks, pomodoroHistory])
-
-  useEffect(() => {
-    // Request notification permission
-    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
-      Notification.requestPermission()
-    }
-  }, [])
+  }
 
   // Add a new task
-  const addTask = () => {
+  const addTask = async () => {
     if (newTaskTitle.trim() === "") return
 
-    const newTask: Task = {
-      id: Date.now().toString(),
+    setIsSaving(true)
+
+    const newTask: Partial<Task> = {
       title: newTaskTitle,
       completed: false,
-      inProgress: false,
       timeSpent: 0,
-      startTime: null,
       expectedTime: 0,
       dependencies: [],
       createdAt: new Date().toISOString(),
@@ -376,22 +478,94 @@ export default function TaskManager() {
       pomodoroCount: 0,
     }
 
-    setTasks([...tasks, newTask])
-    setNewTaskTitle("")
+    try {
+      const response = await fetch("/api/tasks", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newTask),
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        // Add the new task to the state with frontend-specific properties
+        setTasks((prev) => [
+          ...prev,
+          {
+            ...result.data,
+            id: result.data._id,
+            inProgress: false,
+            startTime: null,
+          },
+        ])
+
+        setNewTaskTitle("")
+
+        toast({
+          title: "Success",
+          description: "Task added successfully",
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to add task",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to connect to the server",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   // Delete a task
-  const deleteTask = (id: string) => {
-    // First, remove this task from any dependencies
-    setTasks(
-      tasks.map((task) => ({
-        ...task,
-        dependencies: task.dependencies.filter((depId) => depId !== id),
-      })),
-    )
+  const deleteTask = async (id: string) => {
+    const taskToDelete = tasks.find((task) => task.id === id)
+    if (!taskToDelete || !taskToDelete._id) return
 
-    // Then remove the task
-    setTasks(tasks.filter((task) => task.id !== id))
+    try {
+      const response = await fetch(`/api/tasks/${taskToDelete._id}`, {
+        method: "DELETE",
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        // First, remove this task from any dependencies in the local state
+        setTasks((prev) =>
+          prev
+            .map((task) => ({
+              ...task,
+              dependencies: task.dependencies.filter((depId) => depId !== id),
+            }))
+            .filter((task) => task.id !== id),
+        )
+
+        toast({
+          title: "Success",
+          description: "Task deleted successfully",
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to delete task",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to connect to the server",
+        variant: "destructive",
+      })
+    }
   }
 
   // Start time tracking for a task
@@ -407,11 +581,11 @@ export default function TaskManager() {
 
       if (unmetDependencies.length > 0) {
         // Show notification about unmet dependencies
-        if ("Notification" in window && Notification.permission === "granted") {
-          new Notification("Dependencies Not Met", {
-            body: "This task has dependencies that are not completed yet.",
-          })
-        }
+        toast({
+          title: "Dependencies Not Met",
+          description: "This task has dependencies that are not completed yet.",
+          variant: "destructive",
+        })
 
         // Don't start the task
         return
@@ -444,7 +618,11 @@ export default function TaskManager() {
   }
 
   // Stop time tracking for a task
-  const stopTask = (id: string) => {
+  const stopTask = async (id: string) => {
+    const taskToStop = tasks.find((task) => task.id === id)
+    if (!taskToStop || !taskToStop._id) return
+
+    // Update local state
     setTasks(
       tasks.map((task) => {
         if (task.id === id) {
@@ -457,10 +635,31 @@ export default function TaskManager() {
         return task
       }),
     )
+
+    // Save the updated time to the server
+    try {
+      await fetch(`/api/tasks/${taskToStop._id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          timeSpent: taskToStop.timeSpent,
+        }),
+      })
+    } catch (error) {
+      console.error("Failed to update task time:", error)
+    }
   }
 
   // Complete a task
-  const completeTask = (id: string) => {
+  const completeTask = async (id: string) => {
+    const taskToComplete = tasks.find((task) => task.id === id)
+    if (!taskToComplete || !taskToComplete._id) return
+
+    const completedAt = new Date().toISOString()
+
+    // Update local state
     setTasks(
       tasks.map((task) => {
         if (task.id === id) {
@@ -471,18 +670,38 @@ export default function TaskManager() {
               completed: true,
               inProgress: false,
               startTime: null,
-              completedAt: new Date().toISOString(),
+              completedAt,
             }
           }
           return {
             ...task,
             completed: true,
-            completedAt: new Date().toISOString(),
+            completedAt,
           }
         }
         return task
       }),
     )
+
+    // Save the completed task to the server
+    try {
+      await fetch(`/api/tasks/${taskToComplete._id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          completed: true,
+          completedAt,
+          timeSpent: taskToComplete.timeSpent,
+        }),
+      })
+
+      // Regenerate reports after completing a task
+      fetchWeeklyReports()
+    } catch (error) {
+      console.error("Failed to update task completion status:", error)
+    }
   }
 
   // Open edit dialog
@@ -494,21 +713,62 @@ export default function TaskManager() {
   }
 
   // Save edited task
-  const saveEditedTask = () => {
-    if (editingTask && editedTitle.trim() !== "") {
-      setTasks(
-        tasks.map((task) =>
-          task.id === editingTask.id
-            ? {
-                ...task,
-                title: editedTitle,
-                expectedTime: editedExpectedTime,
-                dependencies: editedDependencies,
-              }
-            : task,
-        ),
-      )
-      setEditingTask(null)
+  const saveEditedTask = async () => {
+    if (!editingTask || !editingTask._id || editedTitle.trim() === "") return
+
+    setIsSaving(true)
+
+    try {
+      const response = await fetch(`/api/tasks/${editingTask._id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: editedTitle,
+          expectedTime: editedExpectedTime,
+          dependencies: editedDependencies,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        // Update the task in local state
+        setTasks(
+          tasks.map((task) =>
+            task.id === editingTask.id
+              ? {
+                  ...task,
+                  title: editedTitle,
+                  expectedTime: editedExpectedTime,
+                  dependencies: editedDependencies,
+                }
+              : task,
+          ),
+        )
+
+        setEditingTask(null)
+
+        toast({
+          title: "Success",
+          description: "Task updated successfully",
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to update task",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to connect to the server",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -585,7 +845,7 @@ export default function TaskManager() {
           date: new Date().toISOString(),
           duration: pomodoroSettings.workDuration,
         }
-        setPomodoroHistory((prev) => [...prev, newSession])
+        savePomodoroSession(newSession)
       }
 
       setPomodoroCount((prev) => prev + 1)
@@ -645,159 +905,166 @@ export default function TaskManager() {
                   value={newTaskTitle}
                   onChange={(e) => setNewTaskTitle(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && addTask()}
+                  disabled={isSaving}
                 />
-                <Button onClick={addTask}>
+                <Button onClick={addTask} disabled={isSaving || newTaskTitle.trim() === ""}>
                   <Plus className="h-4 w-4 mr-2" />
                   Add
                 </Button>
               </div>
 
-              <div className="space-y-3">
-                {tasks.length === 0 ? (
-                  <p className="text-center text-muted-foreground py-4">No tasks yet. Add your first task above!</p>
-                ) : (
-                  tasks.map((task) => {
-                    // Check if task has dependencies
-                    const hasDependencies = task.dependencies.length > 0
+              {isLoading ? (
+                <div className="flex justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {tasks.length === 0 ? (
+                    <p className="text-center text-muted-foreground py-4">No tasks yet. Add your first task above!</p>
+                  ) : (
+                    tasks.map((task) => {
+                      // Check if task has dependencies
+                      const hasDependencies = task.dependencies.length > 0
 
-                    // Check if all dependencies are met
-                    const unmetDependencies = task.dependencies.filter((depId) => {
-                      const depTask = tasks.find((t) => t.id === depId)
-                      return depTask && !depTask.completed
-                    })
+                      // Check if all dependencies are met
+                      const unmetDependencies = task.dependencies.filter((depId) => {
+                        const depTask = tasks.find((t) => t.id === depId)
+                        return depTask && !depTask.completed
+                      })
 
-                    const allDependenciesMet = unmetDependencies.length === 0
+                      const allDependenciesMet = unmetDependencies.length === 0
 
-                    return (
-                      <div
-                        key={task.id}
-                        className={`flex items-center justify-between p-3 border rounded-lg ${
-                          task.completed
-                            ? "bg-muted"
-                            : task.inProgress
-                              ? task.expectedTime > 0 && task.timeSpent > task.expectedTime
-                                ? "bg-red-50 dark:bg-red-950/20"
-                                : "bg-green-50 dark:bg-green-950/20"
-                              : hasDependencies && !allDependenciesMet
-                                ? "bg-amber-50 dark:bg-amber-950/20"
-                                : ""
-                        }`}
-                      >
-                        <div className="flex-1 mr-4">
-                          <div className="flex items-center">
-                            <span className={task.completed ? "line-through text-muted-foreground" : ""}>
-                              {task.title}
-                            </span>
-                            {task.inProgress && (
-                              <Badge
-                                variant="outline"
-                                className={`ml-2 ${
-                                  task.expectedTime > 0 && task.timeSpent > task.expectedTime
-                                    ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
-                                    : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                                }`}
-                              >
-                                {task.expectedTime > 0 && task.timeSpent > task.expectedTime
-                                  ? "Time Exceeded!"
-                                  : "In Progress"}
-                              </Badge>
-                            )}
-                            {task.completed && (
-                              <Badge variant="outline" className="ml-2">
-                                Completed
-                              </Badge>
-                            )}
-                            {hasDependencies && !task.completed && (
-                              <Badge
-                                variant="outline"
-                                className={`ml-2 ${
-                                  allDependenciesMet
-                                    ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                                    : "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300"
-                                }`}
-                              >
-                                {allDependenciesMet ? "Dependencies Met" : "Has Dependencies"}
-                              </Badge>
-                            )}
-                            {task.pomodoroCount > 0 && (
-                              <Badge
-                                variant="outline"
-                                className="ml-2 bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300"
-                              >
-                                {task.pomodoroCount} {task.pomodoroCount === 1 ? "Pomodoro" : "Pomodoros"}
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="text-sm text-muted-foreground mt-1">
-                            Time spent: {formatTime(task.timeSpent)}
-                            {task.expectedTime > 0 && (
-                              <span className="ml-2">
-                                / Expected: {formatTime(task.expectedTime)}
-                                {task.timeSpent > task.expectedTime && !task.inProgress && (
-                                  <span className="text-red-500 ml-1">(Exceeded)</span>
-                                )}
+                      return (
+                        <div
+                          key={task.id}
+                          className={`flex items-center justify-between p-3 border rounded-lg ${
+                            task.completed
+                              ? "bg-muted"
+                              : task.inProgress
+                                ? task.expectedTime > 0 && task.timeSpent > task.expectedTime
+                                  ? "bg-red-50 dark:bg-red-950/20"
+                                  : "bg-green-50 dark:bg-green-950/20"
+                                : hasDependencies && !allDependenciesMet
+                                  ? "bg-amber-50 dark:bg-amber-950/20"
+                                  : ""
+                          }`}
+                        >
+                          <div className="flex-1 mr-4">
+                            <div className="flex items-center">
+                              <span className={task.completed ? "line-through text-muted-foreground" : ""}>
+                                {task.title}
                               </span>
-                            )}
-                            {hasDependencies && (
-                              <div className="mt-1">
-                                <span className="flex items-center">
-                                  <Link className="h-3 w-3 mr-1" />
-                                  Depends on:{" "}
-                                  {task.dependencies.map((depId) => {
-                                    const depTask = tasks.find((t) => t.id === depId)
-                                    return depTask ? (
-                                      <span
-                                        key={depId}
-                                        className={`inline-block mx-1 px-1 text-xs rounded ${
-                                          depTask.completed
-                                            ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                                            : "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300"
-                                        }`}
-                                      >
-                                        {depTask.title}
-                                      </span>
-                                    ) : null
-                                  })}
+                              {task.inProgress && (
+                                <Badge
+                                  variant="outline"
+                                  className={`ml-2 ${
+                                    task.expectedTime > 0 && task.timeSpent > task.expectedTime
+                                      ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+                                      : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                                  }`}
+                                >
+                                  {task.expectedTime > 0 && task.timeSpent > task.expectedTime
+                                    ? "Time Exceeded!"
+                                    : "In Progress"}
+                                </Badge>
+                              )}
+                              {task.completed && (
+                                <Badge variant="outline" className="ml-2">
+                                  Completed
+                                </Badge>
+                              )}
+                              {hasDependencies && !task.completed && (
+                                <Badge
+                                  variant="outline"
+                                  className={`ml-2 ${
+                                    allDependenciesMet
+                                      ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                                      : "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300"
+                                  }`}
+                                >
+                                  {allDependenciesMet ? "Dependencies Met" : "Has Dependencies"}
+                                </Badge>
+                              )}
+                              {task.pomodoroCount > 0 && (
+                                <Badge
+                                  variant="outline"
+                                  className="ml-2 bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300"
+                                >
+                                  {task.pomodoroCount} {task.pomodoroCount === 1 ? "Pomodoro" : "Pomodoros"}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-sm text-muted-foreground mt-1">
+                              Time spent: {formatTime(task.timeSpent)}
+                              {task.expectedTime > 0 && (
+                                <span className="ml-2">
+                                  / Expected: {formatTime(task.expectedTime)}
+                                  {task.timeSpent > task.expectedTime && !task.inProgress && (
+                                    <span className="text-red-500 ml-1">(Exceeded)</span>
+                                  )}
                                 </span>
-                              </div>
+                              )}
+                              {hasDependencies && (
+                                <div className="mt-1">
+                                  <span className="flex items-center">
+                                    <Link className="h-3 w-3 mr-1" />
+                                    Depends on:{" "}
+                                    {task.dependencies.map((depId) => {
+                                      const depTask = tasks.find((t) => t.id === depId)
+                                      return depTask ? (
+                                        <span
+                                          key={depId}
+                                          className={`inline-block mx-1 px-1 text-xs rounded ${
+                                            depTask.completed
+                                              ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                                              : "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300"
+                                          }`}
+                                        >
+                                          {depTask.title}
+                                        </span>
+                                      ) : null
+                                    })}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center space-x-1">
+                            {!task.completed && (
+                              <>
+                                {task.inProgress ? (
+                                  <Button variant="outline" size="icon" onClick={() => stopTask(task.id)}>
+                                    <Square className="h-4 w-4" />
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() => startTask(task.id)}
+                                    disabled={hasDependencies && !allDependenciesMet}
+                                  >
+                                    <Play className="h-4 w-4" />
+                                  </Button>
+                                )}
+                                <Button variant="outline" size="icon" onClick={() => openEditDialog(task)}>
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button variant="outline" size="icon" onClick={() => completeTask(task.id)}>
+                                  ✓
+                                </Button>
+                              </>
                             )}
+                            <Button variant="outline" size="icon" onClick={() => deleteTask(task.id)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </div>
                         </div>
-
-                        <div className="flex items-center space-x-1">
-                          {!task.completed && (
-                            <>
-                              {task.inProgress ? (
-                                <Button variant="outline" size="icon" onClick={() => stopTask(task.id)}>
-                                  <Square className="h-4 w-4" />
-                                </Button>
-                              ) : (
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  onClick={() => startTask(task.id)}
-                                  disabled={hasDependencies && !allDependenciesMet}
-                                >
-                                  <Play className="h-4 w-4" />
-                                </Button>
-                              )}
-                              <Button variant="outline" size="icon" onClick={() => openEditDialog(task)}>
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button variant="outline" size="icon" onClick={() => completeTask(task.id)}>
-                                ✓
-                              </Button>
-                            </>
-                          )}
-                          <Button variant="outline" size="icon" onClick={() => deleteTask(task.id)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
+                      )
+                    })
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -882,142 +1149,169 @@ export default function TaskManager() {
         <TabsContent value="reports">
           <Card>
             <CardHeader>
-              <CardTitle>Weekly Reports</CardTitle>
+              <CardTitle className="flex justify-between items-center">
+                <span>Weekly Reports</span>
+                <Button variant="outline" size="sm" onClick={fetchWeeklyReports} disabled={isGeneratingReports}>
+                  {isGeneratingReports ? (
+                    <>
+                      <div className="animate-spin mr-2 h-4 w-4 border-2 border-b-transparent rounded-full"></div>
+                      Generating...
+                    </>
+                  ) : (
+                    "Refresh Reports"
+                  )}
+                </Button>
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="mb-6">
-                <label className="block text-sm font-medium mb-2">Select Week</label>
-                <Select value={selectedWeek} onValueChange={setSelectedWeek}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a week" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {weeklyReports.map((report) => (
-                      <SelectItem key={report.weekStart} value={report.weekStart}>
-                        {getWeekRangeString(new Date(report.weekStart))}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {isGeneratingReports ? (
+                <div className="flex justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+              ) : (
+                <>
+                  <div className="mb-6">
+                    <label className="block text-sm font-medium mb-2">Select Week</label>
+                    <Select value={selectedWeek} onValueChange={setSelectedWeek}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a week" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {weeklyReports.map((report) => (
+                          <SelectItem key={report.weekStart} value={report.weekStart}>
+                            {getWeekRangeString(new Date(report.weekStart))}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <div className="border rounded-lg p-4">
-                  <h3 className="font-medium mb-4">Week of {getWeekRangeString(new Date(selectedReport.weekStart))}</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Tasks Completed</p>
-                      <p className="text-2xl font-bold">{selectedReport.tasksCompleted}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div className="border rounded-lg p-4">
+                      <h3 className="font-medium mb-4">
+                        Week of {getWeekRangeString(new Date(selectedReport.weekStart))}
+                      </h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Tasks Completed</p>
+                          <p className="text-2xl font-bold">{selectedReport.tasksCompleted}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">Time Spent</p>
+                          <p className="text-2xl font-bold">{formatTime(selectedReport.totalTimeSpent)}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">Pomodoros</p>
+                          <p className="text-2xl font-bold">{selectedReport.pomodoroCount}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">Efficiency</p>
+                          <p className="text-2xl font-bold">
+                            {selectedReport.expectedVsActual < 1
+                              ? "Ahead of schedule"
+                              : selectedReport.expectedVsActual > 1.5
+                                ? "Behind schedule"
+                                : "On track"}
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Time Spent</p>
-                      <p className="text-2xl font-bold">{formatTime(selectedReport.totalTimeSpent)}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Pomodoros</p>
-                      <p className="text-2xl font-bold">{selectedReport.pomodoroCount}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Efficiency</p>
-                      <p className="text-2xl font-bold">
-                        {selectedReport.expectedVsActual < 1
-                          ? "Ahead of schedule"
-                          : selectedReport.expectedVsActual > 1.5
-                            ? "Behind schedule"
-                            : "On track"}
-                      </p>
+
+                    <div className="border rounded-lg p-4">
+                      <h3 className="font-medium mb-2">Tasks Completed This Week</h3>
+                      <ScrollArea className="h-[200px]">
+                        {tasks
+                          .filter(
+                            (task) =>
+                              task.completedAt &&
+                              task.completedAt >= selectedReport.weekStart &&
+                              new Date(task.completedAt) <=
+                                new Date(
+                                  new Date(selectedReport.weekStart).setDate(
+                                    new Date(selectedReport.weekStart).getDate() + 6,
+                                  ),
+                                ),
+                          )
+                          .map((task) => (
+                            <div key={task.id} className="py-2 border-b last:border-0">
+                              <div className="font-medium">{task.title}</div>
+                              <div className="text-sm text-muted-foreground">
+                                Time: {formatTime(task.timeSpent)}
+                                {task.expectedTime > 0 && (
+                                  <span className="ml-2">/ Expected: {formatTime(task.expectedTime)}</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                      </ScrollArea>
                     </div>
                   </div>
-                </div>
 
-                <div className="border rounded-lg p-4">
-                  <h3 className="font-medium mb-2">Tasks Completed This Week</h3>
-                  <ScrollArea className="h-[200px]">
-                    {tasks
-                      .filter(
-                        (task) =>
-                          task.completedAt &&
-                          task.completedAt >= selectedReport.weekStart &&
-                          new Date(task.completedAt) <=
-                            new Date(
-                              new Date(selectedReport.weekStart).setDate(
-                                new Date(selectedReport.weekStart).getDate() + 6,
-                              ),
-                            ),
-                      )
-                      .map((task) => (
-                        <div key={task.id} className="py-2 border-b last:border-0">
-                          <div className="font-medium">{task.title}</div>
-                          <div className="text-sm text-muted-foreground">
-                            Time: {formatTime(task.timeSpent)}
-                            {task.expectedTime > 0 && (
-                              <span className="ml-2">/ Expected: {formatTime(task.expectedTime)}</span>
-                            )}
-                          </div>
+                  <div className="mb-6">
+                    <h3 className="font-medium mb-4">Weekly Progress</h3>
+                    <div className="h-[300px]">
+                      {weeklyChartData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={weeklyChartData}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="week" />
+                            <YAxis yAxisId="left" orientation="left" />
+                            <YAxis yAxisId="right" orientation="right" />
+                            <Tooltip />
+                            <Legend />
+                            <Bar yAxisId="left" dataKey="tasksCompleted" name="Tasks Completed" fill="#3b82f6" />
+                            <Bar yAxisId="left" dataKey="timeSpent" name="Hours Spent" fill="#22c55e" />
+                            <Bar
+                              yAxisId="right"
+                              dataKey="efficiency"
+                              name="Efficiency (lower is better)"
+                              fill="#f59e0b"
+                            />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-muted-foreground">
+                          No data available yet
                         </div>
-                      ))}
-                  </ScrollArea>
-                </div>
-              </div>
-
-              <div className="mb-6">
-                <h3 className="font-medium mb-4">Weekly Progress</h3>
-                <div className="h-[300px]">
-                  {weeklyChartData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={weeklyChartData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="week" />
-                        <YAxis yAxisId="left" orientation="left" />
-                        <YAxis yAxisId="right" orientation="right" />
-                        <Tooltip />
-                        <Legend />
-                        <Bar yAxisId="left" dataKey="tasksCompleted" name="Tasks Completed" fill="#3b82f6" />
-                        <Bar yAxisId="left" dataKey="timeSpent" name="Hours Spent" fill="#22c55e" />
-                        <Bar yAxisId="right" dataKey="efficiency" name="Efficiency (lower is better)" fill="#f59e0b" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-muted-foreground">
-                      No data available yet
+                      )}
                     </div>
-                  )}
-                </div>
-              </div>
+                  </div>
 
-              <div>
-                <h3 className="font-medium mb-4">Productivity Insights</h3>
-                <div className="space-y-2 text-sm">
-                  {selectedReport.tasksCompleted === 0 ? (
-                    <p>No completed tasks in this period to generate insights.</p>
-                  ) : (
-                    <>
-                      <p>
-                        You completed <strong>{selectedReport.tasksCompleted}</strong> tasks this week, spending a total
-                        of <strong>{formatTime(selectedReport.totalTimeSpent)}</strong>.
-                      </p>
-                      {selectedReport.pomodoroCount > 0 && (
-                        <p>
-                          You completed <strong>{selectedReport.pomodoroCount}</strong> pomodoro sessions, which is
-                          approximately <strong>{Math.round((selectedReport.pomodoroCount * 25) / 60)}</strong> hours of
-                          focused work.
-                        </p>
+                  <div>
+                    <h3 className="font-medium mb-4">Productivity Insights</h3>
+                    <div className="space-y-2 text-sm">
+                      {selectedReport.tasksCompleted === 0 ? (
+                        <p>No completed tasks in this period to generate insights.</p>
+                      ) : (
+                        <>
+                          <p>
+                            You completed <strong>{selectedReport.tasksCompleted}</strong> tasks this week, spending a
+                            total of <strong>{formatTime(selectedReport.totalTimeSpent)}</strong>.
+                          </p>
+                          {selectedReport.pomodoroCount > 0 && (
+                            <p>
+                              You completed <strong>{selectedReport.pomodoroCount}</strong> pomodoro sessions, which is
+                              approximately <strong>{Math.round((selectedReport.pomodoroCount * 25) / 60)}</strong>{" "}
+                              hours of focused work.
+                            </p>
+                          )}
+                          {selectedReport.expectedVsActual !== 1 && (
+                            <p>
+                              Your tasks took {selectedReport.expectedVsActual < 1 ? "less" : "more"} time than expected
+                              (ratio: {selectedReport.expectedVsActual.toFixed(2)}), suggesting you're
+                              {selectedReport.expectedVsActual < 1
+                                ? " ahead of schedule and possibly underestimating your efficiency."
+                                : selectedReport.expectedVsActual > 1.5
+                                  ? " behind schedule and might need to allocate more time for tasks."
+                                  : " generally on track with your time estimates."}
+                            </p>
+                          )}
+                        </>
                       )}
-                      {selectedReport.expectedVsActual !== 1 && (
-                        <p>
-                          Your tasks took {selectedReport.expectedVsActual < 1 ? "less" : "more"} time than expected
-                          (ratio: {selectedReport.expectedVsActual.toFixed(2)}), suggesting you're
-                          {selectedReport.expectedVsActual < 1
-                            ? " ahead of schedule and possibly underestimating your efficiency."
-                            : selectedReport.expectedVsActual > 1.5
-                              ? " behind schedule and might need to allocate more time for tasks."
-                              : " generally on track with your time estimates."}
-                        </p>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -1084,7 +1378,16 @@ export default function TaskManager() {
             <Button variant="outline" onClick={() => setEditingTask(null)}>
               Cancel
             </Button>
-            <Button onClick={saveEditedTask}>Save</Button>
+            <Button onClick={saveEditedTask} disabled={isSaving}>
+              {isSaving ? (
+                <>
+                  <div className="animate-spin mr-2 h-4 w-4 border-2 border-b-transparent rounded-full"></div>
+                  Saving...
+                </>
+              ) : (
+                "Save"
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
