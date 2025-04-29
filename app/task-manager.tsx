@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Plus, Pencil, Trash2, Play, Square, Timer, Link, History } from "lucide-react"
+import { Plus, Pencil, Trash2, Play, Square, Timer, Link, History, Repeat } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -126,6 +126,10 @@ type Task = {
   createdAt: string // ISO date string
   completedAt: string | null // ISO date string
   pomodoroCount: number // Number of completed pomodoros
+  isRecurring?: boolean // Whether the task recurs
+  priority?: number // 0: normal, 1: medium, 2: high
+  lastCompletedDate?: string | null // Last date the recurring task was completed
+  recurringType?: "daily" | "weekly" | "monthly" // Type of recurrence
 }
 
 // Pomodoro session type
@@ -156,8 +160,16 @@ export default function TaskManager() {
   const [editedTitle, setEditedTitle] = useState("")
   const [editedExpectedTime, setEditedExpectedTime] = useState(0)
   const [editedDependencies, setEditedDependencies] = useState<string[]>([])
+  const [editedIsRecurring, setEditedIsRecurring] = useState(false)
+  const [editedPriority, setEditedPriority] = useState(0)
+  const [editedRecurringType, setEditedRecurringType] = useState<"daily" | "weekly" | "monthly">("daily")
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [showNewTaskDialog, setShowNewTaskDialog] = useState(false)
+  const [newTaskIsRecurring, setNewTaskIsRecurring] = useState(false)
+  const [newTaskPriority, setNewTaskPriority] = useState(0)
+  const [newTaskExpectedTime, setNewTaskExpectedTime] = useState(0)
+  const [newTaskRecurringType, setNewTaskRecurringType] = useState<"daily" | "weekly" | "monthly">("daily")
 
   // Pomodoro timer state
   const [pomodoroActive, setPomodoroActive] = useState(false)
@@ -482,6 +494,16 @@ export default function TaskManager() {
     }
   }
 
+  // Open new task dialog
+  const openNewTaskDialog = () => {
+    setNewTaskTitle("")
+    setNewTaskIsRecurring(false)
+    setNewTaskPriority(0)
+    setNewTaskExpectedTime(0)
+    setNewTaskRecurringType("daily")
+    setShowNewTaskDialog(true)
+  }
+
   // Add a new task
   const addTask = async () => {
     if (newTaskTitle.trim() === "") return
@@ -500,11 +522,14 @@ export default function TaskManager() {
       title: newTaskTitle,
       completed: false,
       timeSpent: 0,
-      expectedTime: 0,
+      expectedTime: newTaskExpectedTime,
       dependencies: [],
       createdAt: new Date().toISOString(),
       completedAt: null,
       pomodoroCount: 0,
+      isRecurring: newTaskIsRecurring,
+      priority: newTaskPriority,
+      recurringType: newTaskRecurringType,
     }
 
     try {
@@ -530,7 +555,11 @@ export default function TaskManager() {
           },
         ])
 
+        setShowNewTaskDialog(false)
         setNewTaskTitle("")
+        setNewTaskIsRecurring(false)
+        setNewTaskPriority(0)
+        setNewTaskExpectedTime(0)
 
         toast({
           title: "Success",
@@ -739,6 +768,9 @@ export default function TaskManager() {
     setEditedTitle(task.title)
     setEditedExpectedTime(task.expectedTime)
     setEditedDependencies([...task.dependencies])
+    setEditedIsRecurring(task.isRecurring || false)
+    setEditedPriority(task.priority || 0)
+    setEditedRecurringType(task.recurringType || "daily")
   }
 
   // Save edited task
@@ -757,6 +789,9 @@ export default function TaskManager() {
           title: editedTitle,
           expectedTime: editedExpectedTime,
           dependencies: editedDependencies,
+          isRecurring: editedIsRecurring,
+          priority: editedPriority,
+          recurringType: editedRecurringType,
         }),
       })
 
@@ -772,6 +807,9 @@ export default function TaskManager() {
                   title: editedTitle,
                   expectedTime: editedExpectedTime,
                   dependencies: editedDependencies,
+                  isRecurring: editedIsRecurring,
+                  priority: editedPriority,
+                  recurringType: editedRecurringType,
                 }
               : task,
           ),
@@ -890,6 +928,34 @@ export default function TaskManager() {
     setShowPomodoroSettings(false)
   }
 
+  // Get priority badge color
+  const getPriorityBadge = (priority: number) => {
+    switch (priority) {
+      case 2:
+        return <Badge variant="destructive">High Priority</Badge>
+      case 1:
+        return <Badge variant="secondary">Medium Priority</Badge>
+      default:
+        return null
+    }
+  }
+
+  // Get recurring badge
+  const getRecurringBadge = (task: Task) => {
+    if (!task.isRecurring) return null
+
+    let label = "Daily"
+    if (task.recurringType === "weekly") label = "Weekly"
+    if (task.recurringType === "monthly") label = "Monthly"
+
+    return (
+      <Badge variant="outline" className="bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300">
+        <Repeat className="h-3 w-3 mr-1" />
+        {label}
+      </Badge>
+    )
+  }
+
   // Calculate total time spent on completed tasks
   const totalTimeSpent = tasks.filter((task) => task.completed).reduce((total, task) => total + task.timeSpent, 0)
 
@@ -926,6 +992,22 @@ export default function TaskManager() {
     )
   }
 
+  // Sort tasks: first by priority (high to low), then by recurring status, then by creation date
+  const sortedTasks = [...tasks].sort((a, b) => {
+    // First sort by priority (high to low)
+    if ((b.priority || 0) !== (a.priority || 0)) {
+      return (b.priority || 0) - (a.priority || 0)
+    }
+
+    // Then sort by recurring status (recurring first)
+    if (!!b.isRecurring !== !!a.isRecurring) {
+      return b.isRecurring ? 1 : -1
+    }
+
+    // Finally sort by creation date (newest first)
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  })
+
   return (
     <div className="container mx-auto p-4 max-w-3xl">
       <Tabs defaultValue="tasks">
@@ -942,33 +1024,25 @@ export default function TaskManager() {
         <TabsContent value="tasks">
           <Card>
             <CardHeader>
-              <CardTitle>Task Manager with Time Tracking</CardTitle>
+              <CardTitle className="flex justify-between items-center">
+                <span>Task Manager with Time Tracking</span>
+                <Button onClick={openNewTaskDialog}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Task
+                </Button>
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center space-x-2 mb-6">
-                <Input
-                  placeholder="Add a new task..."
-                  value={newTaskTitle}
-                  onChange={(e) => setNewTaskTitle(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addTask()}
-                  disabled={isSaving}
-                />
-                <Button onClick={addTask} disabled={isSaving || newTaskTitle.trim() === ""}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add
-                </Button>
-              </div>
-
               {isLoading ? (
                 <div className="flex justify-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {tasks.length === 0 ? (
+                  {sortedTasks.length === 0 ? (
                     <p className="text-center text-muted-foreground py-4">No tasks yet. Add your first task above!</p>
                   ) : (
-                    tasks.map((task) => {
+                    sortedTasks.map((task) => {
                       // Check if task has dependencies
                       const hasDependencies = task.dependencies.length > 0
 
@@ -992,18 +1066,22 @@ export default function TaskManager() {
                                   : "bg-green-50 dark:bg-green-950/20"
                                 : hasDependencies && !allDependenciesMet
                                   ? "bg-amber-50 dark:bg-amber-950/20"
-                                  : ""
+                                  : task.priority === 2
+                                    ? "bg-red-50/30 dark:bg-red-950/10"
+                                    : task.priority === 1
+                                      ? "bg-amber-50/30 dark:bg-amber-950/10"
+                                      : ""
                           }`}
                         >
                           <div className="flex-1 mr-4">
-                            <div className="flex items-center">
+                            <div className="flex items-center flex-wrap gap-2">
                               <span className={task.completed ? "line-through text-muted-foreground" : ""}>
                                 {task.title}
                               </span>
                               {task.inProgress && (
                                 <Badge
                                   variant="outline"
-                                  className={`ml-2 ${
+                                  className={`${
                                     task.expectedTime > 0 && task.timeSpent > task.expectedTime
                                       ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
                                       : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
@@ -1022,7 +1100,7 @@ export default function TaskManager() {
                               {hasDependencies && !task.completed && (
                                 <Badge
                                   variant="outline"
-                                  className={`ml-2 ${
+                                  className={`${
                                     allDependenciesMet
                                       ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
                                       : "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300"
@@ -1034,11 +1112,13 @@ export default function TaskManager() {
                               {task.pomodoroCount > 0 && (
                                 <Badge
                                   variant="outline"
-                                  className="ml-2 bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300"
+                                  className="bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300"
                                 >
                                   {task.pomodoroCount} {task.pomodoroCount === 1 ? "Pomodoro" : "Pomodoros"}
                                 </Badge>
                               )}
+                              {getPriorityBadge(task.priority || 0)}
+                              {getRecurringBadge(task)}
                             </div>
                             <div className="text-sm text-muted-foreground mt-1">
                               Time spent: {formatTime(task.timeSpent)}
@@ -1399,6 +1479,50 @@ export default function TaskManager() {
               />
             </div>
             <div className="space-y-2">
+              <label className="text-sm font-medium">Priority</label>
+              <Select
+                value={editedPriority.toString()}
+                onValueChange={(value) => setEditedPriority(Number.parseInt(value))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select priority" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">Normal</SelectItem>
+                  <SelectItem value="1">Medium</SelectItem>
+                  <SelectItem value="2">High</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="is-recurring"
+                checked={editedIsRecurring}
+                onCheckedChange={(checked) => setEditedIsRecurring(!!checked)}
+              />
+              <label htmlFor="is-recurring" className="text-sm font-medium">
+                Recurring Task
+              </label>
+            </div>
+            {editedIsRecurring && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Recurrence Type</label>
+                <Select
+                  value={editedRecurringType}
+                  onValueChange={(value) => setEditedRecurringType(value as "daily" | "weekly" | "monthly")}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select recurrence type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="space-y-2">
               <label className="text-sm font-medium">Dependencies</label>
               <div className="border rounded-md p-2 max-h-[200px] overflow-y-auto">
                 {tasks
@@ -1436,6 +1560,100 @@ export default function TaskManager() {
                 </>
               ) : (
                 "Save"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* New Task Dialog */}
+      <Dialog open={showNewTaskDialog} onOpenChange={setShowNewTaskDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add New Task</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="new-task-title" className="text-sm font-medium">
+                Task Title
+              </label>
+              <Input
+                id="new-task-title"
+                value={newTaskTitle}
+                onChange={(e) => setNewTaskTitle(e.target.value)}
+                placeholder="Task title"
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="new-expected-time" className="text-sm font-medium">
+                Expected Time (minutes)
+              </label>
+              <Input
+                id="new-expected-time"
+                type="number"
+                min="0"
+                value={newTaskExpectedTime / 60}
+                onChange={(e) => setNewTaskExpectedTime(Math.max(0, Number.parseFloat(e.target.value) * 60 || 0))}
+                placeholder="Expected time in minutes"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Priority</label>
+              <Select
+                value={newTaskPriority.toString()}
+                onValueChange={(value) => setNewTaskPriority(Number.parseInt(value))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select priority" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">Normal</SelectItem>
+                  <SelectItem value="1">Medium</SelectItem>
+                  <SelectItem value="2">High</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="new-is-recurring"
+                checked={newTaskIsRecurring}
+                onCheckedChange={(checked) => setNewTaskIsRecurring(!!checked)}
+              />
+              <label htmlFor="new-is-recurring" className="text-sm font-medium">
+                Recurring Task
+              </label>
+            </div>
+            {newTaskIsRecurring && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Recurrence Type</label>
+                <Select
+                  value={newTaskRecurringType}
+                  onValueChange={(value) => setNewTaskRecurringType(value as "daily" | "weekly" | "monthly")}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select recurrence type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowNewTaskDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={addTask} disabled={isSaving || newTaskTitle.trim() === ""}>
+              {isSaving ? (
+                <>
+                  <div className="animate-spin mr-2 h-4 w-4 border-2 border-b-transparent rounded-full"></div>
+                  Adding...
+                </>
+              ) : (
+                "Add Task"
               )}
             </Button>
           </DialogFooter>

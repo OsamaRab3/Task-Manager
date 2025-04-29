@@ -10,6 +10,19 @@ function formatDate(date) {
   return new Date(date).toISOString().split("T")[0]
 }
 
+// Helper to check if a recurring task needs to be reset
+function shouldResetRecurringTask(task) {
+  if (!task.isRecurring) return false
+
+  // If never completed or completed on a different day, it should be reset
+  if (!task.lastCompletedDate) return true
+
+  const lastCompletedDate = formatDate(task.lastCompletedDate)
+  const today = formatDate(new Date())
+
+  return lastCompletedDate !== today
+}
+
 export async function GET() {
   try {
     await dbConnect()
@@ -22,9 +35,31 @@ export async function GET() {
 
     const userId = session.user.id
 
-    const tasks = await Task.find({ userId }).sort({ createdAt: -1 })
+    // Get all tasks
+    const tasks = await Task.find({ userId }).sort({ priority: -1, createdAt: -1 })
 
-    return NextResponse.json({ success: true, data: tasks })
+    // Reset completed status for recurring tasks if needed
+    const today = new Date()
+    const updatedTasks = []
+
+    for (const task of tasks) {
+      if (task.isRecurring && task.completed) {
+        // Check if the task was completed on a different day
+        if (shouldResetRecurringTask(task)) {
+          // Reset the task for today
+          task.completed = false
+          task.completedAt = null
+          await task.save()
+          updatedTasks.push(task)
+        }
+      }
+    }
+
+    // Get the updated list of tasks
+    const finalTasks =
+      updatedTasks.length > 0 ? await Task.find({ userId }).sort({ priority: -1, createdAt: -1 }) : tasks
+
+    return NextResponse.json({ success: true, data: finalTasks })
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }

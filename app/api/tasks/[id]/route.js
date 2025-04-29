@@ -58,6 +58,11 @@ export async function PUT(request, { params }) {
     // Check if task is being completed
     const isBeingCompleted = !existingTask.completed && data.completed === true
 
+    // If this is a recurring task being completed, set the lastCompletedDate
+    if (existingTask.isRecurring && isBeingCompleted) {
+      data.lastCompletedDate = new Date()
+    }
+
     const task = await Task.findOneAndUpdate({ _id: params.id, userId }, data, { new: true, runValidators: true })
 
     // If task is being completed, update user activity
