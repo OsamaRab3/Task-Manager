@@ -760,6 +760,14 @@ export default function TaskManager() {
       }),
     )
 
+    // Show motivational message when stopping a task
+    toast({
+      title: getMotivationalPhrase(),
+      description: `تم إيقاف "${taskToStop.title}" - استراحة سعيدة!`,
+      variant: "default",
+      className: "bg-blue-100 dark:bg-blue-900 border-blue-500 text-blue-800 dark:text-blue-300 font-bold text-lg",
+    })
+
     // Save the updated time to the server
     try {
       await fetch(`/api/tasks/${taskToStop._id}`, {
