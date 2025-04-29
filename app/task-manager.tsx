@@ -71,6 +71,12 @@ const getWeekRangeString = (date: Date) => {
   return `${startStr} - ${endStr}, ${yearStr}`
 }
 
+// Get a random motivational phrase in Arabic
+const getMotivationalPhrase = () => {
+  const phrases = ["شطور! 🌟", "عاش يا بطل! 💪", "كمل! 🔥", "استمر! 👏", "أحسنت! 🎯", "رائع! ⭐"]
+  return phrases[Math.floor(Math.random() * phrases.length)]
+}
+
 // Pie Chart Component
 function PieChartComponent({ data }: { data: { name: string; value: number; status: string }[] }) {
   // Only include tasks with time > 0
@@ -583,6 +589,66 @@ export default function TaskManager() {
     }
   }
 
+  // Complete a task
+  const completeTask = async (id: string) => {
+    const taskToComplete = tasks.find((task) => task.id === id)
+    if (!taskToComplete || !taskToComplete._id) return
+
+    const completedAt = new Date().toISOString()
+
+    // Update local state
+    setTasks(
+      tasks.map((task) => {
+        if (task.id === id) {
+          // If task is in progress, stop it first
+          if (task.inProgress) {
+            return {
+              ...task,
+              completed: true,
+              inProgress: false,
+              startTime: null,
+              completedAt,
+            }
+          }
+          return {
+            ...task,
+            completed: true,
+            completedAt,
+          }
+        }
+        return task
+      }),
+    )
+
+    // Show motivational message
+    toast({
+      title: getMotivationalPhrase(),
+      description: `تم إكمال "${taskToComplete.title}" بنجاح!`,
+      variant: "default",
+      className: "bg-green-100 dark:bg-green-900 border-green-500 text-green-800 dark:text-green-300 font-bold text-lg",
+    })
+
+    // Save the completed task to the server
+    try {
+      await fetch(`/api/tasks/${taskToComplete._id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          completed: true,
+          completedAt,
+          timeSpent: taskToComplete.timeSpent,
+        }),
+      })
+
+      // Regenerate reports after completing a task
+      fetchWeeklyReports()
+    } catch (error) {
+      console.error("Failed to update task completion status:", error)
+    }
+  }
+
   // Delete a task
   const deleteTask = async (id: string) => {
     const taskToDelete = tasks.find((task) => task.id === id)
@@ -707,58 +773,6 @@ export default function TaskManager() {
       })
     } catch (error) {
       console.error("Failed to update task time:", error)
-    }
-  }
-
-  // Complete a task
-  const completeTask = async (id: string) => {
-    const taskToComplete = tasks.find((task) => task.id === id)
-    if (!taskToComplete || !taskToComplete._id) return
-
-    const completedAt = new Date().toISOString()
-
-    // Update local state
-    setTasks(
-      tasks.map((task) => {
-        if (task.id === id) {
-          // If task is in progress, stop it first
-          if (task.inProgress) {
-            return {
-              ...task,
-              completed: true,
-              inProgress: false,
-              startTime: null,
-              completedAt,
-            }
-          }
-          return {
-            ...task,
-            completed: true,
-            completedAt,
-          }
-        }
-        return task
-      }),
-    )
-
-    // Save the completed task to the server
-    try {
-      await fetch(`/api/tasks/${taskToComplete._id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          completed: true,
-          completedAt,
-          timeSpent: taskToComplete.timeSpent,
-        }),
-      })
-
-      // Regenerate reports after completing a task
-      fetchWeeklyReports()
-    } catch (error) {
-      console.error("Failed to update task completion status:", error)
     }
   }
 
