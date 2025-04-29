@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Plus, Pencil, Trash2, Play, Square, Timer, Link, History, Repeat } from "lucide-react"
+import { Plus, Pencil, Trash2, Play, Square, Timer, Link, History, Repeat, CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -74,6 +74,12 @@ const getWeekRangeString = (date: Date) => {
 // Get a random motivational phrase in Arabic
 const getMotivationalPhrase = () => {
   const phrases = ["شطور! 🌟", "عاش يا بطل! 💪", "كمل! 🔥", "استمر! 👏", "أحسنت! 🎯", "رائع! ⭐"]
+  return phrases[Math.floor(Math.random() * phrases.length)]
+}
+
+// Get a random congratulatory phrase for completing all tasks
+const getCompletionPhrase = () => {
+  const phrases = ["أنجزت كل المهام! 🎉", "يوم مثمر! 🌟", "أحسنت العمل اليوم! 💪", "إنجاز رائع! 🏆", "أنت نجم! ⭐"]
   return phrases[Math.floor(Math.random() * phrases.length)]
 }
 
@@ -176,6 +182,8 @@ export default function TaskManager() {
   const [newTaskPriority, setNewTaskPriority] = useState(0)
   const [newTaskExpectedTime, setNewTaskExpectedTime] = useState(0)
   const [newTaskRecurringType, setNewTaskRecurringType] = useState<"daily" | "weekly" | "monthly">("daily")
+  const [allTasksCompleted, setAllTasksCompleted] = useState(false)
+  const [lastCheckedDate, setLastCheckedDate] = useState<string>(formatDate(new Date()))
 
   // Pomodoro timer state
   const [pomodoroActive, setPomodoroActive] = useState(false)
@@ -203,6 +211,7 @@ export default function TaskManager() {
   // Audio refs
   const alarmAudioRef = useRef<HTMLAudioElement | null>(null)
   const pomodoroAudioRef = useRef<HTMLAudioElement | null>(null)
+  const celebrationAudioRef = useRef<HTMLAudioElement | null>(null)
 
   // Timer interval ref
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null)
@@ -211,6 +220,8 @@ export default function TaskManager() {
   useEffect(() => {
     alarmAudioRef.current = new Audio("/alarm.mp3")
     pomodoroAudioRef.current = new Audio("/pomodoro-bell.mp3")
+    // You can add a celebration sound here if you have one
+    // celebrationAudioRef.current = new Audio("/celebration.mp3")
 
     return () => {
       if (timerIntervalRef.current) {
@@ -218,6 +229,79 @@ export default function TaskManager() {
       }
     }
   }, [])
+
+  // Check if all tasks are completed and if it's a new day
+  useEffect(() => {
+    const today = formatDate(new Date())
+
+    // Check if it's a new day
+    if (today !== lastCheckedDate) {
+      setLastCheckedDate(today)
+
+      // Archive completed tasks from previous day
+      archiveCompletedTasks()
+    }
+
+    // Check if all non-recurring tasks are completed
+    const nonRecurringTasks = tasks.filter((task) => !task.isRecurring)
+    const hasNonRecurringTasks = nonRecurringTasks.length > 0
+    const allNonRecurringCompleted = hasNonRecurringTasks && nonRecurringTasks.every((task) => task.completed)
+
+    // Check if all tasks for today are completed (including recurring tasks)
+    const hasAnyIncompleteTasks = tasks.some((task) => !task.completed)
+
+    setAllTasksCompleted(!hasAnyIncompleteTasks && hasNonRecurringTasks)
+
+    // If all tasks are completed, show a celebration message
+    if (allNonRecurringCompleted && hasNonRecurringTasks && !allTasksCompleted) {
+      toast({
+        title: getCompletionPhrase(),
+        description: "لقد أكملت جميع المهام لهذا اليوم! 🎊",
+        variant: "default",
+        className:
+          "bg-green-100 dark:bg-green-900 border-green-500 text-green-800 dark:text-green-300 font-bold text-lg",
+      })
+
+      // Play celebration sound if available
+      if (celebrationAudioRef.current) {
+        celebrationAudioRef.current.play().catch((e) => console.log("Audio play failed:", e))
+      }
+    }
+  }, [tasks, lastCheckedDate, allTasksCompleted, toast])
+
+  // Archive completed tasks (move them to history but keep them in the database)
+  const archiveCompletedTasks = async () => {
+    // Only archive if authenticated
+    if (status !== "authenticated") return
+
+    // Get all completed non-recurring tasks
+    const completedTasks = tasks.filter((task) => task.completed && !task.isRecurring)
+
+    if (completedTasks.length === 0) return
+
+    // Remove completed tasks from the UI
+    setTasks((prevTasks) => prevTasks.filter((task) => !completedTasks.includes(task)))
+
+    // We don't actually delete the tasks from the database
+    // They will still be available in history and reports
+    // This is just a UI cleanup
+
+    toast({
+      title: "يوم جديد! 🌅",
+      description: "تم أرشفة المهام المكتملة من اليوم السابق.",
+      variant: "default",
+      className: "bg-blue-100 dark:bg-blue-900 border-blue-500 text-blue-800 dark:text-blue-300 font-bold text-lg",
+    })
+
+    // Refresh reports to include the archived tasks
+    fetchWeeklyReports()
+  }
+
+  // Manually archive completed tasks
+  const handleArchiveCompletedTasks = () => {
+    archiveCompletedTasks()
+    setAllTasksCompleted(false)
+  }
 
   // Fetch tasks from API
   const fetchTasks = useCallback(async () => {
@@ -567,6 +651,9 @@ export default function TaskManager() {
         setNewTaskPriority(0)
         setNewTaskExpectedTime(0)
 
+        // If all tasks were completed before, they're not anymore
+        setAllTasksCompleted(false)
+
         toast({
           title: "Success",
           description: "Task added successfully",
@@ -644,6 +731,13 @@ export default function TaskManager() {
 
       // Regenerate reports after completing a task
       fetchWeeklyReports()
+
+      // Check if all tasks are now completed
+      const remainingTasks = tasks.filter((t) => t.id !== id && !t.completed)
+      if (remainingTasks.length === 0 && tasks.length > 1) {
+        // All tasks are completed
+        setAllTasksCompleted(true)
+      }
     } catch (error) {
       console.error("Failed to update task completion status:", error)
     }
@@ -1075,6 +1169,26 @@ export default function TaskManager() {
               {isLoading ? (
                 <div className="flex justify-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+              ) : allTasksCompleted ? (
+                <div className="flex flex-col items-center justify-center py-8 space-y-6">
+                  <div className="text-center">
+                    <CheckCircle2 className="h-16 w-16 text-green-500 mx-auto mb-4" />
+                    <h2 className="text-2xl font-bold mb-2">{getCompletionPhrase()}</h2>
+                    <p className="text-muted-foreground mb-6">لقد أكملت جميع المهام لهذا اليوم!</p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <Button onClick={openNewTaskDialog} className="flex items-center">
+                      <Plus className="h-4 w-4 mr-2" />
+                      إضافة مهام جديدة
+                    </Button>
+
+                    <Button variant="outline" onClick={handleArchiveCompletedTasks} className="flex items-center">
+                      <CheckCircle2 className="h-4 w-4 mr-2" />
+                      أرشفة المهام المكتملة
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-3">
