@@ -945,11 +945,20 @@ export default function TaskManager() {
     if (!task.isRecurring) return null
 
     let label = "Daily"
-    if (task.recurringType === "weekly") label = "Weekly"
-    if (task.recurringType === "monthly") label = "Monthly"
+    let badgeClass = "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300"
+
+    // Special styling for daily tasks
+    if (task.recurringType === "daily") {
+      badgeClass = "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 font-bold"
+      label = "📅 Daily"
+    } else if (task.recurringType === "weekly") {
+      label = "Weekly"
+    } else if (task.recurringType === "monthly") {
+      label = "Monthly"
+    }
 
     return (
-      <Badge variant="outline" className="bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300">
+      <Badge variant="outline" className={badgeClass}>
         <Repeat className="h-3 w-3 mr-1" />
         {label}
       </Badge>
@@ -994,12 +1003,20 @@ export default function TaskManager() {
 
   // Sort tasks: first by priority (high to low), then by recurring status, then by creation date
   const sortedTasks = [...tasks].sort((a, b) => {
-    // First sort by priority (high to low)
+    // First sort by daily recurring tasks (daily recurring tasks first)
+    if (a.isRecurring && a.recurringType === "daily" && (!b.isRecurring || b.recurringType !== "daily")) {
+      return -1
+    }
+    if (b.isRecurring && b.recurringType === "daily" && (!a.isRecurring || a.recurringType !== "daily")) {
+      return 1
+    }
+
+    // Then sort by priority (high to low)
     if ((b.priority || 0) !== (a.priority || 0)) {
       return (b.priority || 0) - (a.priority || 0)
     }
 
-    // Then sort by recurring status (recurring first)
+    // Then sort by other recurring status (recurring first)
     if (!!b.isRecurring !== !!a.isRecurring) {
       return b.isRecurring ? 1 : -1
     }
@@ -1064,13 +1081,15 @@ export default function TaskManager() {
                                 ? task.expectedTime > 0 && task.timeSpent > task.expectedTime
                                   ? "bg-red-50 dark:bg-red-950/20"
                                   : "bg-green-50 dark:bg-green-950/20"
-                                : hasDependencies && !allDependenciesMet
-                                  ? "bg-amber-50 dark:bg-amber-950/20"
-                                  : task.priority === 2
-                                    ? "bg-red-50/30 dark:bg-red-950/10"
-                                    : task.priority === 1
-                                      ? "bg-amber-50/30 dark:bg-amber-950/10"
-                                      : ""
+                                : task.isRecurring && task.recurringType === "daily"
+                                  ? "bg-blue-50/40 dark:bg-blue-950/20 border-l-4 border-l-blue-500"
+                                  : hasDependencies && !allDependenciesMet
+                                    ? "bg-amber-50 dark:bg-amber-950/20"
+                                    : task.priority === 2
+                                      ? "bg-red-50/30 dark:bg-red-950/10"
+                                      : task.priority === 1
+                                        ? "bg-amber-50/30 dark:bg-amber-950/10"
+                                        : ""
                           }`}
                         >
                           <div className="flex-1 mr-4">
