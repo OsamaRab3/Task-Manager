@@ -239,7 +239,7 @@ export default function TaskManager() {
       setLastCheckedDate(today)
 
       // Archive completed tasks from previous day
-      archiveCompletedTasks()
+      handleArchiveCompletedTasks()
     }
 
     // Check if all non-recurring tasks are completed
@@ -270,7 +270,35 @@ export default function TaskManager() {
   }, [tasks, lastCheckedDate, allTasksCompleted, toast])
 
   // Archive completed tasks (move them to history but keep them in the database)
-  const archiveCompletedTasks = async () => {
+  // const archiveCompletedTasks = async () => {
+  //   // Only archive if authenticated
+  //   if (status !== "authenticated") return
+
+  //   // Get all completed non-recurring tasks
+  //   const completedTasks = tasks.filter((task) => task.completed && !task.isRecurring)
+
+  //   if (completedTasks.length === 0) return
+
+  //   // Remove completed tasks from the UI
+  //   setTasks((prevTasks) => prevTasks.filter((task) => !completedTasks.includes(task)))
+
+  //   // We don't actually delete the tasks from the database
+  //   // They will still be available in history and reports
+  //   // This is just a UI cleanup
+
+  //   toast({
+  //     title: "يوم جديد! 🌅",
+  //     description: "تم أرشفة المهام المكتملة من اليوم السابق.",
+  //     variant: "default",
+  //     className: "bg-blue-100 dark:bg-blue-900 border-blue-500 text-blue-800 dark:text-blue-300 font-bold text-lg",
+  //   })
+
+  //   // Refresh reports to include the archived tasks
+  //   fetchWeeklyReports()
+  // }
+
+  // Manually archive completed tasks
+  const handleArchiveCompletedTasks = async () => {
     // Only archive if authenticated
     if (status !== "authenticated") return
 
@@ -282,24 +310,19 @@ export default function TaskManager() {
     // Remove completed tasks from the UI
     setTasks((prevTasks) => prevTasks.filter((task) => !completedTasks.includes(task)))
 
-    // We don't actually delete the tasks from the database
-    // They will still be available in history and reports
-    // This is just a UI cleanup
+    // Store current date for future reference
+    const today = formatDate(new Date())
+    localStorage.setItem("lastActiveDate", today)
 
     toast({
-      title: "يوم جديد! 🌅",
-      description: "تم أرشفة المهام المكتملة من اليوم السابق.",
+      title: "تم الأرشفة! 📁",
+      description: "تم أرشفة المهام المكتملة بنجاح.",
       variant: "default",
       className: "bg-blue-100 dark:bg-blue-900 border-blue-500 text-blue-800 dark:text-blue-300 font-bold text-lg",
     })
 
     // Refresh reports to include the archived tasks
     fetchWeeklyReports()
-  }
-
-  // Manually archive completed tasks
-  const handleArchiveCompletedTasks = () => {
-    archiveCompletedTasks()
     setAllTasksCompleted(false)
   }
 
@@ -321,7 +344,32 @@ export default function TaskManager() {
           inProgress: false, // Reset inProgress state on load
           startTime: null, // Reset startTime on load
         }))
-        setTasks(tasksWithId)
+
+        // Check if it's a new day compared to the last time tasks were loaded
+        const today = formatDate(new Date())
+        const storedLastDate = localStorage.getItem("lastActiveDate")
+
+        if (storedLastDate && storedLastDate !== today) {
+          // It's a new day, filter out completed non-recurring tasks
+          const filteredTasks = tasksWithId.filter((task) => !task.completed || task.isRecurring)
+          setTasks(filteredTasks)
+
+          // Show notification about archived tasks
+          toast({
+            title: "يوم جديد! 🌅",
+            description: "تم أرشفة المهام المكتملة من اليوم السابق.",
+            variant: "default",
+            className:
+              "bg-blue-100 dark:bg-blue-900 border-blue-500 text-blue-800 dark:text-blue-300 font-bold text-lg",
+          })
+        } else {
+          // Same day or first load, show all tasks
+          setTasks(tasksWithId)
+        }
+
+        // Store current date for future reference
+        localStorage.setItem("lastActiveDate", today)
+        setLastCheckedDate(today)
       } else {
         toast({
           title: "Error",
@@ -339,6 +387,34 @@ export default function TaskManager() {
       setIsLoading(false)
     }
   }, [toast, status])
+
+  // Improve the archiveCompletedTasks function to be more robust
+  // const archiveCompletedTasks = async () => {
+  //   // Only archive if authenticated
+  //   if (status !== "authenticated") return
+
+  //   // Get all completed non-recurring tasks
+  //   const completedTasks = tasks.filter((task) => task.completed && !task.isRecurring)
+
+  //   if (completedTasks.length === 0) return
+
+  //   // Remove completed tasks from the UI
+  //   setTasks((prevTasks) => prevTasks.filter((task) => !completedTasks.includes(task)))
+
+  //   // Store current date for future reference
+  //   const today = formatDate(new Date())
+  //   localStorage.setItem('lastActiveDate', today)
+
+  //   toast({
+  //     title: "تم الأرشفة! 📁",
+  //     description: "تم أرشفة المهام المكتملة بنجاح.",
+  //     variant: "default",
+  //     className: "bg-blue-100 dark:bg-blue-900 border-blue-500 text-blue-800 dark:text-blue-300 font-bold text-lg",
+  //   })
+
+  //   // Refresh reports to include the archived tasks
+  //   fetchWeeklyReports()
+  // }
 
   // Fetch pomodoro sessions from API
   const fetchPomodoroSessions = useCallback(async () => {
