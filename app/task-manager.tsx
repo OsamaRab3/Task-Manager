@@ -350,20 +350,24 @@ export default function TaskManager() {
         const storedLastDate = localStorage.getItem("lastActiveDate")
 
         if (storedLastDate && storedLastDate !== today) {
-          // It's a new day, filter out completed non-recurring tasks
-          const filteredTasks = tasksWithId.filter((task) => !task.completed || task.isRecurring)
+          // It's a new day, only show tasks created today and recurring tasks
+          const filteredTasks = tasksWithId.filter((task) => {
+            const taskCreationDate = formatDate(new Date(task.createdAt))
+            return taskCreationDate === today || task.isRecurring
+          })
+
           setTasks(filteredTasks)
 
-          // Show notification about archived tasks
+          // Show notification about new day
           toast({
             title: "يوم جديد! 🌅",
-            description: "تم أرشفة المهام المكتملة من اليوم السابق.",
+            description: "تم تحميل المهام الجديدة لهذا اليوم فقط والمهام المتكررة.",
             variant: "default",
             className:
               "bg-blue-100 dark:bg-blue-900 border-blue-500 text-blue-800 dark:text-blue-300 font-bold text-lg",
           })
         } else {
-          // Same day or first load, show all tasks
+          // Same day, show all tasks
           setTasks(tasksWithId)
         }
 
@@ -386,7 +390,7 @@ export default function TaskManager() {
     } finally {
       setIsLoading(false)
     }
-  }, [toast, status])
+  }, [toast, status, setTasks, setLastCheckedDate])
 
   // Improve the archiveCompletedTasks function to be more robust
   // const archiveCompletedTasks = async () => {
@@ -618,7 +622,15 @@ export default function TaskManager() {
         clearInterval(timerIntervalRef.current)
       }
     }
-  }, [pomodoroActive, currentPomodoroSession, pomodoroSettings, selectedTaskForPomodoro])
+  }, [
+    pomodoroActive,
+    currentPomodoroSession,
+    pomodoroSettings,
+    selectedTaskForPomodoro,
+    setTasks,
+    savePomodoroSession,
+    pomodoroCount,
+  ])
 
   // Save pomodoro session to server
   const savePomodoroSession = async (session: PomodoroSession) => {
@@ -1711,10 +1723,7 @@ export default function TaskManager() {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Priority</label>
-              <Select
-                value={editedPriority.toString()}
-                onValueChange={(value) => setEditedPriority(Number.parseInt(value))}
-              >
+              <Select value={editedPriority.toString()} onChange={(value) => setEditedPriority(Number.parseInt(value))}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select priority" />
                 </SelectTrigger>
@@ -1740,7 +1749,7 @@ export default function TaskManager() {
                 <label className="text-sm font-medium">Recurrence Type</label>
                 <Select
                   value={editedRecurringType}
-                  onValueChange={(value) => setEditedRecurringType(value as "daily" | "weekly" | "monthly")}
+                  onChange={(value) => setEditedRecurringType(value as "daily" | "weekly" | "monthly")}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select recurrence type" />
@@ -1763,7 +1772,7 @@ export default function TaskManager() {
                       <Checkbox
                         id={`dep-${task.id}`}
                         checked={editedDependencies.includes(task.id)}
-                        onCheckedChange={() => toggleDependency(task.id)}
+                        onChange={() => toggleDependency(task.id)}
                       />
                       <label
                         htmlFor={`dep-${task.id}`}
@@ -1859,7 +1868,7 @@ export default function TaskManager() {
                 <label className="text-sm font-medium">Recurrence Type</label>
                 <Select
                   value={newTaskRecurringType}
-                  onValueChange={(value) => setNewTaskRecurringType(value as "daily" | "weekly" | "monthly")}
+                  onChange={(value) => setNewTaskRecurringType(value as "daily" | "weekly" | "monthly")}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select recurrence type" />
