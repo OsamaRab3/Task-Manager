@@ -622,15 +622,7 @@ export default function TaskManager() {
         clearInterval(timerIntervalRef.current)
       }
     }
-  }, [
-    pomodoroActive,
-    currentPomodoroSession,
-    pomodoroSettings,
-    selectedTaskForPomodoro,
-    setTasks,
-    savePomodoroSession,
-    pomodoroCount,
-  ])
+  }, [pomodoroActive, currentPomodoroSession, pomodoroSettings, selectedTaskForPomodoro, setTasks, pomodoroCount])
 
   // Save pomodoro session to server
   const savePomodoroSession = async (session: PomodoroSession) => {
@@ -1723,7 +1715,10 @@ export default function TaskManager() {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Priority</label>
-              <Select value={editedPriority.toString()} onChange={(value) => setEditedPriority(Number.parseInt(value))}>
+              <Select
+                value={editedPriority.toString()}
+                onValueChange={(value) => setEditedPriority(Number.parseInt(value))}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select priority" />
                 </SelectTrigger>
@@ -1749,7 +1744,7 @@ export default function TaskManager() {
                 <label className="text-sm font-medium">Recurrence Type</label>
                 <Select
                   value={editedRecurringType}
-                  onChange={(value) => setEditedRecurringType(value as "daily" | "weekly" | "monthly")}
+                  onValueChange={(value) => setEditedRecurringType(value as "daily" | "weekly" | "monthly")}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select recurrence type" />
@@ -1772,7 +1767,7 @@ export default function TaskManager() {
                       <Checkbox
                         id={`dep-${task.id}`}
                         checked={editedDependencies.includes(task.id)}
-                        onChange={() => toggleDependency(task.id)}
+                        onCheckedChange={() => toggleDependency(task.id)}
                       />
                       <label
                         htmlFor={`dep-${task.id}`}
@@ -1868,7 +1863,7 @@ export default function TaskManager() {
                 <label className="text-sm font-medium">Recurrence Type</label>
                 <Select
                   value={newTaskRecurringType}
-                  onChange={(value) => setNewTaskRecurringType(value as "daily" | "weekly" | "monthly")}
+                  onValueChange={(value) => setNewTaskRecurringType(value as "daily" | "weekly" | "monthly")}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select recurrence type" />
